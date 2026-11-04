@@ -1,5 +1,7 @@
 import requests
 from kivy.app import App
+from kivy.core.window import Window
+from kivy.graphics import Color, Rectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
@@ -9,11 +11,16 @@ from kivy.uix.screenmanager import Screen, ScreenManager
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
 
-API = "http://127.0.0.1:8000"  # adresse du backend FastAPI
+API = "http://127.0.0.1:8000"
+
+ROYAL_BLUE = (37 / 255, 99 / 255, 235 / 255, 1)
+PALE_BLUE = (219 / 255, 234 / 255, 254 / 255, 1)
+WHITE = (1, 1, 1, 1)
+LIGHT_GRAY = (241 / 255, 245 / 255, 249 / 255, 1)
+NIGHT_BLUE = (30 / 255, 41 / 255, 59 / 255, 1)
 
 
 def api(method, path, **kwargs):
-    """Appelle le backend. Retourne le JSON, ou None en cas d'erreur."""
     try:
         r = requests.request(method, API + path, timeout=5, **kwargs)
         r.raise_for_status()
@@ -23,9 +30,17 @@ def api(method, path, **kwargs):
         return None
 
 
-class ScrollList(ScrollView):
-    """Une liste verticale défilable."""
+def set_background(widget, color):
+    with widget.canvas.before:
+        Color(*color)
+        rectangle = Rectangle(pos=widget.pos, size=widget.size)
+    widget.bind(
+        pos=lambda instance, value: setattr(rectangle, "pos", value),
+        size=lambda instance, value: setattr(rectangle, "size", value),
+    )
 
+
+class ScrollList(ScrollView):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.box = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(5))
@@ -34,7 +49,20 @@ class ScrollList(ScrollView):
 
 
 def make_button(text, callback, **kwargs):
-    btn = Button(text=text, **kwargs)
+    variant = kwargs.pop("variant", "primary")
+    background, foreground = {
+        "primary": (ROYAL_BLUE, WHITE),
+        "secondary": (PALE_BLUE, NIGHT_BLUE),
+        "dark": (NIGHT_BLUE, WHITE),
+    }[variant]
+    btn = Button(
+        text=text,
+        color=foreground,
+        background_normal="",
+        background_down="",
+        background_color=background,
+        **kwargs,
+    )
     btn.bind(on_release=lambda *_: callback())
     return btn
 
@@ -43,23 +71,40 @@ def make_button(text, callback, **kwargs):
 class StudentsScreen(Screen):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.session_active = False  # True après avoir cliqué sur "Démarrer"
+        set_background(self, LIGHT_GRAY)
+        self.session_active = False  
         self.pending_present_ids = set()
 
         root = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(8))
         root.add_widget(
-            Label(text="Gestion de présence", font_size="22sp", size_hint_y=None, height=dp(40))
+            Label(
+                text="Gestion de présence",
+                font_size="22sp",
+                color=NIGHT_BLUE,
+                bold=True,
+                size_hint_y=None,
+                height=dp(40),
+            )
         )
 
         # Barre d'ajout d'un étudiant
         add_bar = BoxLayout(size_hint_y=None, height=dp(45), spacing=dp(5))
-        self.name_input = TextInput(hint_text="Nom de l'étudiant", multiline=False)
+        self.name_input = TextInput(
+            hint_text="Nom de l'étudiant",
+            multiline=False,
+            foreground_color=NIGHT_BLUE,
+            hint_text_color=(30 / 255, 41 / 255, 59 / 255, 0.6),
+            cursor_color=ROYAL_BLUE,
+            background_normal="",
+            background_active="",
+            background_color=WHITE,
+        )
         self.name_input.bind(on_text_validate=lambda *_: self.add_student())
         add_bar.add_widget(self.name_input)
         add_bar.add_widget(make_button("Ajouter", self.add_student, size_hint_x=None, width=dp(100)))
         root.add_widget(add_bar)
 
-        self.info = Label(size_hint_y=None, height=dp(25))
+        self.info = Label(color=ROYAL_BLUE, size_hint_y=None, height=dp(25))
         root.add_widget(self.info)
 
         self.list = ScrollList()
@@ -68,13 +113,16 @@ class StudentsScreen(Screen):
         # Boutons du bas
         actions = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(5))
         actions.add_widget(make_button("Démarrer la présence", self.start_attendance))
-        actions.add_widget(make_button("Présents", lambda: self.go("present")))
-        actions.add_widget(make_button("Absents", lambda: self.go("absent")))
+        actions.add_widget(make_button("Présents", lambda: self.go("present"), variant="secondary"))
+        actions.add_widget(make_button("Absents", lambda: self.go("absent"), variant="secondary"))
         root.add_widget(actions)
 
         self.add_widget(root)
 
     def on_pre_enter(self, *args):
+        if self.session_active:
+            self.session_active = False
+            self.pending_present_ids.clear()
         self.refresh()
 
     def go(self, screen_name):
@@ -128,7 +176,7 @@ class StudentsScreen(Screen):
         self.info.text = (
             "Présence en cours : cochez ou décochez les étudiants"
             if self.session_active
-            else "Cochez les présents, puis démarrez la présence"
+            else "Cochez pour la présence"
         )
         self.list.box.clear_widgets()
         students = api("GET", "/students")
@@ -138,25 +186,37 @@ class StudentsScreen(Screen):
 
         for s in students:
             row = BoxLayout(size_hint_y=None, height=dp(45), spacing=dp(5))
+            set_background(row, WHITE)
             cb = CheckBox(
                 active=(
                     s["status"] == "present"
                     if self.session_active
                     else s["id"] in self.pending_present_ids
                 ),
+                color=ROYAL_BLUE,
                 size_hint_x=None,
                 width=dp(40),
             )
-            # sid=s["id"] "fige" l'id de cet étudiant pour cette ligne
+
             cb.bind(active=lambda inst, value, sid=s["id"]: self.toggle(sid, value))
             row.add_widget(cb)
-            row.add_widget(Label(text=s["name"], halign="left"))
+            name_label = Label(
+                text=s["name"],
+                color=NIGHT_BLUE,
+                halign="left",
+                valign="middle",
+            )
+            name_label.bind(
+                size=lambda label, size: setattr(label, "text_size", size)
+            )
+            row.add_widget(name_label)
             row.add_widget(
                 make_button(
                     "Supprimer",
                     lambda sid=s["id"]: self.delete_student(sid),
                     size_hint_x=None,
                     width=dp(100),
+                    variant="dark",
                 )
             )
             self.list.box.add_widget(row)
@@ -166,17 +226,32 @@ class StudentsScreen(Screen):
 class ListScreen(Screen):
     def __init__(self, kind, **kwargs):
         super().__init__(**kwargs)
-        self.kind = kind  # "present" ou "absent"
+        set_background(self, LIGHT_GRAY)
+        self.kind = kind  
         title = "Liste des présents" if kind == "present" else "Liste des absents"
 
         root = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(8))
-        root.add_widget(Label(text=title, font_size="22sp", size_hint_y=None, height=dp(40)))
+        root.add_widget(
+            Label(
+                text=title,
+                font_size="22sp",
+                color=NIGHT_BLUE,
+                bold=True,
+                size_hint_y=None,
+                height=dp(40),
+            )
+        )
         self.list = ScrollList()
         root.add_widget(self.list)
 
         actions = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(5))
-        actions.add_widget(make_button("Réinitialiser la liste", self.reset))
-        actions.add_widget(make_button("Retour", lambda: setattr(self.manager, "current", "students")))
+        actions.add_widget(
+            make_button(
+                "Retour",
+                lambda: setattr(self.manager, "current", "students"),
+                variant="secondary",
+            )
+        )
         root.add_widget(actions)
         self.add_widget(root)
 
@@ -190,25 +265,27 @@ class ListScreen(Screen):
             self.list.box.add_widget(
                 Label(
                     text="Impossible de joindre le serveur FastAPI !",
+                    color=NIGHT_BLUE,
                     size_hint_y=None,
                     height=dp(40),
                 )
             )
             return
         if not students:
-            self.list.box.add_widget(Label(text="Aucun étudiant", size_hint_y=None, height=dp(40)))
+            self.list.box.add_widget(
+                Label(text="Aucun étudiant", color=NIGHT_BLUE, size_hint_y=None, height=dp(40))
+            )
         for s in students:
-            self.list.box.add_widget(Label(text=s["name"], size_hint_y=None, height=dp(35)))
-
-    def reset(self):
-        api("POST", f"/attendance/{self.kind}/reset")
-        self.refresh()
-
+            self.list.box.add_widget(
+                Label(text=s["name"], color=NIGHT_BLUE, size_hint_y=None, height=dp(35))
+            )
 
 # =====================  Application  =====================
 class PresenceApp(App):
     def build(self):
+        Window.clearcolor = LIGHT_GRAY
         sm = ScreenManager()
+        set_background(sm, LIGHT_GRAY)
         sm.add_widget(StudentsScreen(name="students"))
         sm.add_widget(ListScreen(kind="present", name="present"))
         sm.add_widget(ListScreen(kind="absent", name="absent"))

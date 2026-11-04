@@ -97,14 +97,3 @@ def list_present():
 def list_absent():
     return run("SELECT * FROM students WHERE status = 'absent' ORDER BY name")
 
-
-@app.post("/attendance/present/reset")
-def reset_present():
-    run("UPDATE students SET status = 'none' WHERE status = 'present'")
-    return {"message": "Liste des présents réinitialisée"}
-
-
-@app.post("/attendance/absent/reset")
-def reset_absent():
-    run("UPDATE students SET status = 'none' WHERE status = 'absent'")
-    return {"message": "Liste des absents réinitialisée"}
